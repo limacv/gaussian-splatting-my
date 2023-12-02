@@ -13,6 +13,7 @@ import os
 import logging
 from argparse import ArgumentParser
 import shutil
+import cv2
 
 # This Python script is based on the shell converter script provided in the MipNerF 360 repository.
 parser = ArgumentParser("Colmap converter")
@@ -58,8 +59,7 @@ if not args.skip_matching:
     mapper_cmd = (colmap_command + " mapper \
         --database_path " + args.source_path + "/distorted/database.db \
         --image_path "  + args.source_path + "/input \
-        --output_path "  + args.source_path + "/distorted/sparse \
-        --Mapper.ba_global_function_tolerance=0.000001")
+        --output_path "  + args.source_path + "/distorted/sparse")
     exit_code = os.system(mapper_cmd)
     if exit_code != 0:
         logging.error(f"Mapper failed with code {exit_code}. Exiting.")
@@ -99,26 +99,18 @@ if(args.resize):
     # Copy each file from the source directory to the destination directory
     for file in files:
         source_file = os.path.join(args.source_path, "images", file)
-
+        img = cv2.imread(source_file)
+        
         destination_file = os.path.join(args.source_path, "images_2", file)
-        shutil.copy2(source_file, destination_file)
-        exit_code = os.system(magick_command + " mogrify -resize 50% " + destination_file)
-        if exit_code != 0:
-            logging.error(f"50% resize failed with code {exit_code}. Exiting.")
-            exit(exit_code)
+        img2 = cv2.resize(img, None, None, 0.5, 0.5, interpolation=cv2.INTER_AREA)
+        cv2.imwrite(destination_file, img2)
 
         destination_file = os.path.join(args.source_path, "images_4", file)
-        shutil.copy2(source_file, destination_file)
-        exit_code = os.system(magick_command + " mogrify -resize 25% " + destination_file)
-        if exit_code != 0:
-            logging.error(f"25% resize failed with code {exit_code}. Exiting.")
-            exit(exit_code)
-
+        img2 = cv2.resize(img, None, None, 0.25, 0.25, interpolation=cv2.INTER_AREA)
+        cv2.imwrite(destination_file, img2)
+        
         destination_file = os.path.join(args.source_path, "images_8", file)
-        shutil.copy2(source_file, destination_file)
-        exit_code = os.system(magick_command + " mogrify -resize 12.5% " + destination_file)
-        if exit_code != 0:
-            logging.error(f"12.5% resize failed with code {exit_code}. Exiting.")
-            exit(exit_code)
+        img2 = cv2.resize(img, None, None, 0.125, 0.125, interpolation=cv2.INTER_AREA)
+        cv2.imwrite(destination_file, img2)
 
 print("Done.")
