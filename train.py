@@ -21,6 +21,8 @@ import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
+import imageio
+import numpy as np
 from arguments import ModelParams, PipelineParams, OptimizationParams
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -172,10 +174,18 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                 for idx, viewpoint in enumerate(config['cameras']):
                     image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-                    if tb_writer and (idx < 5):
-                        tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=iteration)
-                        if iteration == testing_iterations[0]:
-                            tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
+                    
+                    save_path = os.path.join(scene.model_path, "images", f"iteration_{iteration}")
+                    os.makedirs(save_path, exist_ok=True)
+                    imageio.imwrite(os.path.join(save_path, f"view_{viewpoint.image_name}.png"), 
+                                    (image * 255).detach().permute(1, 2, 0).cpu().numpy().astype(np.uint8))
+
+                    if iteration == testing_iterations[0]:
+                        save_path = os.path.join(scene.model_path, "images", "ground_truth")
+                        os.makedirs(save_path, exist_ok=True)
+                        imageio.imwrite(os.path.join(save_path, f"view_{viewpoint.image_name}.png"),
+                                        (gt_image * 255).detach().permute(1, 2, 0).cpu().numpy().astype(np.uint8))
+                    
                     l1_test += l1_loss(image, gt_image).mean().double()
                     psnr_test += psnr(image, gt_image).mean().double()
                 psnr_test /= len(config['cameras'])
