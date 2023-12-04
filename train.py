@@ -12,7 +12,7 @@
 import os
 import torch
 from random import randint
-from utils.loss_utils import l1_loss, ssim
+from utils.loss_utils import l1_loss, l2_loss, ssim
 from gaussian_renderer import render, network_gui
 import sys
 from scene import Scene, GaussianModel
@@ -92,8 +92,49 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         gt_image = viewpoint_cam.original_image.cuda()
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
-        loss.backward()
 
+        # normal optimization
+        if opt.optimize_normal:
+            with torch.no_grad():
+                # render depth map
+                xyz = gaussians.get_xyz
+                xyzw = torch.cat([xyz, torch.ones_like(xyz[:, :1])], dim=-1)
+                view_mat = viewpoint_cam.world_view_transform
+                xyzw_view = xyzw @ view_mat[:, :3]
+                displacement = 1 / xyzw_view[:, 2:3]
+                displacement = torch.nan_to_num(displacement, 0, 0, 0)
+                displacement = displacement.expand(-1, 3).contiguous()
+                depth_pkg = render(viewpoint_cam, gaussians, pipe, 
+                                   bg_color=torch.tensor([0., 0., 0.]).type_as(displacement), 
+                                   override_color=displacement)
+                depth_map = 1 / depth_pkg["render"][0]
+                depth_map = torch.clamp(depth_map, viewpoint_cam.znear, viewpoint_cam.zfar)
+                
+                # compute normal from depth
+                fovx, fovy = viewpoint_cam.FoVx, viewpoint_cam.FoVy
+                halftanfovx, halftanfovy = np.tan((fovx / 2)), np.tan((fovy / 2))
+                ray_x = torch.linspace(-halftanfovx, halftanfovx, viewpoint_cam.image_width)
+                ray_y = torch.linspace(-halftanfovy, halftanfovy, viewpoint_cam.image_height)
+                ray_y, ray_x = torch.meshgrid(ray_y, ray_x)
+                ray_z = torch.ones_like(ray_x)
+                ray = torch.stack([ray_x, ray_y, ray_z], dim=-1).type_as(depth_map)
+                point = ray * depth_map[..., None]
+                point_x = point[1:, :-1] - point[:-1, :-1]
+                point_y = point[:-1, 1:] - point[:-1, :-1]
+                normal_gt = torch.cross(point_x, point_y, dim=-1).reshape(-1, 3)
+                normal_gt = torch.nn.functional.normalize(normal_gt, dim=-1, eps=1e-8)
+                normal_gt = normal_gt @ view_mat[:3, :3].T
+                normal_gt = normal_gt.reshape_as(point_x).permute(2, 0, 1)
+            # render normal map
+            normal_pkg = render(viewpoint_cam, gaussians, pipe, 
+                                bg_color=torch.tensor([0., 0., 0.]).type_as(displacement), 
+                                override_color=gaussians.get_normal)
+            normal_pred = normal_pkg["render"][:, :-1, :-1]
+            loss_normal = l2_loss(normal_pred, normal_gt)
+            loss = loss + loss_normal
+
+        loss.backward()
+        
         iter_end.record()
 
         with torch.no_grad():
@@ -106,7 +147,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 progress_bar.close()
 
             # Log and save
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), opt)
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -155,7 +196,7 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
+def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, optimArgs):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
@@ -179,6 +220,15 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                     os.makedirs(save_path, exist_ok=True)
                     imageio.imwrite(os.path.join(save_path, f"view_{viewpoint.image_name}.png"), 
                                     (image * 255).detach().permute(1, 2, 0).cpu().numpy().astype(np.uint8))
+
+                    # write normal
+                    if optimArgs.optimize_normal:
+                        normal = renderFunc(viewpoint, scene.gaussians, renderArgs[0],
+                                            bg_color=torch.tensor([0., 0., 0.]).type_as(image), 
+                                            override_color=scene.gaussians.get_normal)["render"]
+                        normal = torch.clamp((normal + 1) * 0.5, 0., 1.)
+                        imageio.imwrite(os.path.join(save_path, f"view_{viewpoint.image_name}_n.png"), 
+                                        (normal * 255).detach().permute(1, 2, 0).cpu().numpy().astype(np.uint8))
 
                     if iteration == testing_iterations[0]:
                         save_path = os.path.join(scene.model_path, "images", "ground_truth")
