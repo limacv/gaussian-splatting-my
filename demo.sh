@@ -7,7 +7,7 @@
 
 python train.py \
     -s /home/lmaag/xgpu-scratch/lmaag/data/zhu/ \
-    --model_path output/test_normal_0 \
+    --model_path output/test_normal_1 \
     --optimize_normal \
     -r 2 \
     --test_iterations 10 100 1000 7000 30000 \

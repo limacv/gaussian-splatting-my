@@ -58,6 +58,15 @@ class GaussianModel:
         self.percent_dense = 0
         self.spatial_lr_scale = 0
         self.setup_functions()
+        self._training = True
+
+    def eval(self):
+        self._training = False
+        return self
+    
+    def train(self):
+        self._training = True
+        return self
 
     def capture(self):
         return (
@@ -97,31 +106,36 @@ class GaussianModel:
 
     @property
     def get_scaling(self):
-        return self.scaling_activation(self._scaling)
+        ret = self.scaling_activation(self._scaling)
+        return ret if self._training else ret.detach()
     
     @property
     def get_rotation(self):
-        return self.rotation_activation(self._rotation)
+        ret = self.rotation_activation(self._rotation)
+        return ret if self._training else ret.detach()
     
     @property
     def get_xyz(self):
-        return self._xyz
+        return self._xyz if self._training else self._xyz.detach()
     
     @property
     def get_normal(self):
         denorm = torch.norm(self._normal, dim=-1, keepdim=True)
         denorm = torch.clamp_min(denorm, 1e-7).detach()
-        return self._normal / denorm
+        ret = self._normal / denorm
+        return ret if self._training else ret.detach()
     
     @property
     def get_features(self):
         features_dc = self._features_dc
         features_rest = self._features_rest
-        return torch.cat((features_dc, features_rest), dim=1)
+        ret = torch.cat((features_dc, features_rest), dim=1)
+        return ret if self._training else ret.detach()
     
     @property
     def get_opacity(self):
-        return self.opacity_activation(self._opacity)
+        ret = self.opacity_activation(self._opacity)
+        return ret if self._training else ret.detach()
     
     def get_covariance(self, scaling_modifier = 1):
         return self.covariance_activation(self.get_scaling, scaling_modifier, self._rotation)

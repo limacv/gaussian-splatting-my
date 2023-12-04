@@ -126,9 +126,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 normal_gt = normal_gt @ view_mat[:3, :3].T
                 normal_gt = normal_gt.reshape_as(point_x).permute(2, 0, 1)
             # render normal map
+            gaussians_normal = gaussians.get_normal
+            gaussians.eval()
             normal_pkg = render(viewpoint_cam, gaussians, pipe, 
                                 bg_color=torch.tensor([0., 0., 0.]).type_as(displacement), 
-                                override_color=gaussians.get_normal)
+                                override_color=gaussians_normal)
+            gaussians.train()
             normal_pred = normal_pkg["render"][:, :-1, :-1]
             loss_normal = l2_loss(normal_pred, normal_gt)
             loss = loss + loss_normal
