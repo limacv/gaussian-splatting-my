@@ -105,6 +105,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 displacement = torch.nan_to_num(displacement, 0, 0, 0)
                 displacement = displacement.expand(-1, 3).contiguous()
                 depth_pkg = render(viewpoint_cam, gaussians, pipe, 
+                                   scaling_modifier=1.2,
                                    bg_color=torch.tensor([0., 0., 0.]).type_as(displacement), 
                                    override_color=displacement)
                 depth_map = 1 / depth_pkg["render"][0]
