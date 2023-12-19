@@ -13,6 +13,7 @@ import os
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, l2_loss, ssim
+from utils.image_utils import gaussianblur, guidedfilter2d, guidedfilter2d_gray
 from gaussian_renderer import render, network_gui
 import sys
 from scene import Scene, GaussianModel
@@ -105,13 +106,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 displacement = torch.nan_to_num(displacement, 0, 0, 0)
                 displacement = displacement.expand(-1, 3).contiguous()
                 depth_pkg = render(viewpoint_cam, gaussians, pipe, 
-                                   scaling_modifier=1.2,
+                                #    scaling_modifier=1.2,
                                    bg_color=torch.tensor([0., 0., 0.]).type_as(displacement), 
                                    override_color=displacement)
-                depth_map = 1 / depth_pkg["render"][0]
+                
+                depth_map = depth_pkg["render"][None, :1]
+                # depth_map = gaussianblur(depth_pkg["render"][None, :1], kernel_sz=(7, 7))
+                # depth_map = guidedfilter2d(gt_image[None], depth_pkg["render"][None, :1], radius=7, eps=0.1)
+                depth_map = 1 / depth_map[0, 0]
                 depth_map = torch.clamp(depth_map, viewpoint_cam.znear, viewpoint_cam.zfar)
                 
-                # compute normal from depth
+                # compute normal from depth   
                 fovx, fovy = viewpoint_cam.FoVx, viewpoint_cam.FoVy
                 halftanfovx, halftanfovy = np.tan((fovx / 2)), np.tan((fovy / 2))
                 ray_x = torch.linspace(-halftanfovx, halftanfovx, viewpoint_cam.image_width)
@@ -126,6 +131,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 normal_gt = torch.nn.functional.normalize(normal_gt, dim=-1, eps=1e-8)
                 normal_gt = normal_gt @ view_mat[:3, :3].T
                 normal_gt = normal_gt.reshape_as(point_x).permute(2, 0, 1)
+
+                normal_gt = guidedfilter2d(gt_image[None, :, 1:, 1:], normal_gt[None], radius=7, eps=0.5)[0]
+                normal_gt = torch.nn.functional.normalize(normal_gt, dim=0, eps=1e-8)
             # render normal map
             gaussians_normal = gaussians.get_normal
             gaussians.eval()
@@ -261,7 +269,7 @@ if __name__ == "__main__":
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument('--ip', type=str, default="127.0.0.1")
-    parser.add_argument('--port', type=int, default=6009)
+    parser.add_argument('--port', type=int, default=-1)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
@@ -278,7 +286,8 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
-    network_gui.init(args.ip, args.port)
+    if args.port > 0:
+        network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
     training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
 
