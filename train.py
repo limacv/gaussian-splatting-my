@@ -14,7 +14,7 @@ import torch
 from random import randint
 from utils.loss_utils import l1_loss, l2_loss, ssim
 from utils.image_utils import gaussianblur, guidedfilter2d, guidedfilter2d_gray
-from gaussian_renderer import render, network_gui
+from gaussian_renderer import render, network_gui, set_backend
 import sys
 from scene import Scene, GaussianModel
 from utils.general_utils import safe_state
@@ -26,7 +26,7 @@ import imageio
 import numpy as np
 from arguments import ModelParams, PipelineParams, OptimizationParams
 try:
-    from torch.utils.tensorboard import SummaryWriter
+    from tensorboardX import SummaryWriter
     TENSORBOARD_FOUND = True
 except ImportError:
     TENSORBOARD_FOUND = False
@@ -230,7 +230,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                     
                     save_path = os.path.join(scene.model_path, "images", f"iteration_{iteration}")
                     os.makedirs(save_path, exist_ok=True)
-                    imageio.imwrite(os.path.join(save_path, f"view_{viewpoint.image_name}.png"), 
+                    imageio.imwrite(os.path.join(save_path, f"{config['name']}_view_{viewpoint.image_name}.png"), 
                                     (image * 255).detach().permute(1, 2, 0).cpu().numpy().astype(np.uint8))
 
                     # write normal
@@ -239,13 +239,13 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                                             bg_color=torch.tensor([0., 0., 0.]).type_as(image), 
                                             override_color=scene.gaussians.get_normal)["render"]
                         normal = torch.clamp((normal + 1) * 0.5, 0., 1.)
-                        imageio.imwrite(os.path.join(save_path, f"view_{viewpoint.image_name}_n.png"), 
+                        imageio.imwrite(os.path.join(save_path, f"{config['name']}_view_{viewpoint.image_name}_n.png"), 
                                         (normal * 255).detach().permute(1, 2, 0).cpu().numpy().astype(np.uint8))
 
                     if iteration == testing_iterations[0]:
                         save_path = os.path.join(scene.model_path, "images", "ground_truth")
                         os.makedirs(save_path, exist_ok=True)
-                        imageio.imwrite(os.path.join(save_path, f"view_{viewpoint.image_name}.png"),
+                        imageio.imwrite(os.path.join(save_path, f"{config['name']}_view_{viewpoint.image_name}.png"),
                                         (gt_image * 255).detach().permute(1, 2, 0).cpu().numpy().astype(np.uint8))
                     
                     l1_test += l1_loss(image, gt_image).mean().double()
@@ -277,6 +277,7 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--backend", type=str, default = "original", choices=["original", "my"])
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -284,7 +285,7 @@ if __name__ == "__main__":
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
-
+    set_backend(args.backend)
     # Start GUI server, configure and run training
     if args.port > 0:
         network_gui.init(args.ip, args.port)

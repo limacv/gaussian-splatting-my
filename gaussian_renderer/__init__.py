@@ -11,11 +11,47 @@
 
 import torch
 import math
-from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+try:
+    from diff_gaussian_rasterization import GaussianRasterizationSettings
+    from diff_gaussian_rasterization import GaussianRasterizer as GaussianRasterizerOri
+except ImportError:
+    GaussianRasterizerOri = None
+
+try:
+    from diff_gaussian_rasterization_my import GaussianRasterizationSettings
+    from diff_gaussian_rasterization_my import GaussianRasterizer as GaussianRasterizerMy
+except ImportError:
+    GaussianRasterizerMy = None
+
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
+if GaussianRasterizerOri is not None:
+    _Rasterizer = GaussianRasterizerOri
+    assert GaussianRasterizerMy is None, "Two backends are enabled simutaneously, to avoid ambiguity, please uninstall one"
+    print(f"Use rasterizer: GaussianRasterizerOri")
+elif GaussianRasterizerMy is not None:
+    _Rasterizer = GaussianRasterizerMy
+    print(f"Use rasterizer: GaussianRasterizerMy")
+else:
+    raise RuntimeError(f"Cannot import any rasterizer")
+
+
+def set_backend(backend): # original, my
+    return  # now choose based on what we have to avoid colloide
+    global _Rasterizer
+
+    if backend == "original":
+        _Rasterizer = GaussianRasterizerOri
+    elif backend == "my":
+        _Rasterizer = GaussianRasterizerMy
+        assert _Rasterizer is not None, f"backend my failed"
+    else:
+        raise RuntimeError(f"Unrecognized rasterizer: {backend}")
+    
+
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, 
+           backend="original"):
     """
     Render the scene. 
     
@@ -48,7 +84,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         debug=pipe.debug
     )
 
-    rasterizer = GaussianRasterizer(raster_settings=raster_settings)
+    rasterizer = _Rasterizer(raster_settings=raster_settings)
 
     means3D = pc.get_xyz
     means2D = screenspace_points
