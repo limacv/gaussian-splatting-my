@@ -323,6 +323,14 @@ def readCamerasFromEyefulCameras(camjson, imageformat, force_undistort):
             undistort = cv2.undistort(image, mtx, dist, None, mtx)
             mask = cv2.undistort(mask, mtx, dist, None, mtx)
             
+            if distort_mod == "Fisheye" and force_undistort:
+                if i == 0:
+                    print("Detect Fisheye Camera" + ", Doing undistortion" if force_undistort else ".")
+                map1, map2 = cv2.fisheye.initUndistortRectifyMap(mtx, np.array([0, 0, 0, 0.]), np.eye(3), mtx, (cam_img_w, cam_img_h), cv2.CV_16SC2)
+                pinhole = cv2.remap(undistort, map1, map2, interpolation=cv2.INTER_AREA)
+                mask = cv2.remap(mask, map1, map2, interpolation=cv2.INTER_NEAREST)
+                undistort = pinhole
+                
             image = np.concatenate([undistort, mask[..., None]], axis=-1)
             image = Image.fromarray(np.array(image, dtype=np.byte), "RGBA")
             cam_infos.append(CameraInfo(uid=cameraId, R=R, T=T, FovY=FovY, FovX=FovX, image=image, cx=cx, cy=cy, 
@@ -335,11 +343,11 @@ def readCamerasFromEyefulCameras(camjson, imageformat, force_undistort):
     return cam_infos
 
 
-def readEyefulInfo(path, subdir, force_undistort, eval):
+def readEyefulInfo(path, subdir, force_pinhole, eval):
     import trimesh
     
     print("Reading Cameras.json")
-    cam_infos = readCamerasFromEyefulCameras(os.path.join(path, "cameras.json"), subdir, force_undistort)
+    cam_infos = readCamerasFromEyefulCameras(os.path.join(path, "cameras.json"), subdir, force_pinhole)
     
     # read split.json
     with open(os.path.join(path, "splits.json")) as json_file:
@@ -364,14 +372,9 @@ def readEyefulInfo(path, subdir, force_undistort, eval):
     xyz, _ = trimesh.sample.sample_surface_even(mesh, num_pts, seed=0)
     # sample additional points on far-field
     sphere_pt = np.random.randn(20_000, 3).astype(np.float32)
-    sphere_pt = sphere_pt / (np.linalg.norm(sphere_pt, axis=-1, keepdims=True) + 0.00001) * 100
-    # sample additional points on y = 0 plane
-    plane_pt = np.random.rand(20_000, 3).astype(np.float32) * 100
-    plane_pt[:, 1] *= 0.01
-    plane_pt = plane_pt[np.logical_or(plane_pt[:, 0] < xyz[:, 0].min(), plane_pt[:, 0] > xyz[:, 0].max())]
-    plane_pt = plane_pt[np.logical_or(plane_pt[:, 2] < xyz[:, 2].min(), plane_pt[:, 2] < xyz[:, 2].max())]
+    sphere_pt = sphere_pt / (np.linalg.norm(sphere_pt, axis=-1, keepdims=True) + 0.00001) * 50
 
-    xyz = np.concatenate([xyz, sphere_pt, plane_pt])
+    xyz = np.concatenate([xyz, sphere_pt])
     color = np.ones_like(xyz) * 0.1
     normals = xyz / np.linalg.norm(xyz, axis=-1, keepdims=True)
     pcd = BasicPointCloud(points=xyz, colors=color, normals=normals)

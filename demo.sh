@@ -61,12 +61,34 @@
 #     --eval \
 #     --backend my
 
+for dataset in seating_area table office_view1 apartment; do
+
+# 3w
 python train.py \
-    -s /cpfs01/shared/pjlab-lingjun-landmarks/eyeful/apartment \
-    --model_path /cpfs01/user/mali1/output/eyeful_apartment_jpeg2k \
+    -s /cpfs01/shared/pjlab-lingjun-landmarks/eyeful/$dataset \
+    --model_path /cpfs01/user/mali1/output/eyeful_${dataset}_jpeg2k \
+    --resolution 2 \
+    --eyeful_subdir images-jpeg-2k \
     --test_iterations 10 100 1000 7000 10000 20000 25000 30000 \
     --checkpoint_iterations 7000 30000 \
     --eval
+
+# 6w
+python train.py \
+    -s /cpfs01/shared/pjlab-lingjun-landmarks/eyeful/$dataset \
+    --model_path /cpfs01/user/mali1/output/eyeful_${dataset}_jpeg2k_6w \
+    --resolution 2 \
+    --eyeful_subdir images-jpeg-2k \
+    --test_iterations 10 100 1000 7000 10000 20000 30000 40000 50000 60000 \
+    --checkpoint_iterations 15000 60000\
+    --save_iterations 15000 3000 60000\
+    --iterations 60000 \
+    --position_lr_max_steps 60000 \
+    --global_lr_scalar 0.5 \
+    --densify_until_iter 30000 \
+    --eval
+
+done
 
 exit 0
 }

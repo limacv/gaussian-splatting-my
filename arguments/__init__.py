@@ -52,7 +52,7 @@ class ModelParams(ParamGroup):
         self._images = "images"
         self._resolution = -1
         self._white_background = False
-        self._force_undistort = True
+        self._force_pinhole = True
         self._eyeful_subdir = "images-jpeg-2k"
         self.data_device = "cuda"
         self.eval = False
@@ -74,6 +74,7 @@ class OptimizationParams(ParamGroup):
     def __init__(self, parser):
         self.optimize_normal = False
         self.iterations = 30_000
+        self.global_lr_scalar = 1.0
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
