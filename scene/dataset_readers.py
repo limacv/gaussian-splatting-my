@@ -22,6 +22,8 @@ from pathlib import Path
 from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
+from typing import Optional
+from glob import glob
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -34,6 +36,9 @@ class CameraInfo(NamedTuple):
     image_name: str
     width: int
     height: int
+    cx: Optional[float] = None  # normalized cx, = cx / w - 0.5
+    cy: Optional[float] = None  # normalized cy, = cy / w - 0.5
+    distcoeffs: Optional[np.array] = None
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -215,7 +220,6 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
 
             cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
                             image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1]))
-            
     return cam_infos
 
 def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
@@ -254,7 +258,134 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
                            ply_path=ply_path)
     return scene_info
 
+
+# for eyeful dataset
+def readCamerasFromEyefulCameras(camjson, imageformat, force_undistort):
+    import cv2
+    cam_infos = []
+
+    with open(camjson) as json_file:
+        contents = json.load(json_file)
+        ext = None
+        for i, cam_info_raw in enumerate(contents["KRT"]):
+            print(f"\r read {i}/{len(contents['KRT'])}", end="")
+            cameraId = cam_info_raw["cameraId"]
+            sensorId = cam_info_raw["sensorId"]
+            height, width = cam_info_raw["height"], cam_info_raw["width"]
+            intrin = np.array(cam_info_raw["K"]).T
+            distort_mod = cam_info_raw["distortionModel"]
+            distort = cam_info_raw["distortion"]
+            extrin = np.array(cam_info_raw["T"]).T  # world to camera, opencv
+
+            R = np.transpose(extrin[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
+            T = extrin[:3, 3]
+            
+            fx = intrin[0, 0]
+            fy = intrin[1, 1]
+            cx = intrin[0, 2]
+            cy = intrin[1, 2]
+            FovX = focal2fov(fx, width)
+            FovY = focal2fov(fy, height)
+            cx = cx / width - 0.5
+            cy = cy / height - 0.5
+
+            if len(distort) == 8:
+                k1, k2, k3, _, _, _, p1, p2 = distort
+            else:
+                k1, k2, p1, p2, k3 = distort
+            
+            if ext is None:
+                image_path = os.path.join(os.path.dirname(camjson), imageformat, f"{cameraId}.*")
+                image_path = glob(image_path)[0]
+                ext = image_path.split('.')[-1]
+            else:
+                image_path = os.path.join(os.path.dirname(camjson), imageformat, f"{cameraId}.{ext}")
+            image_name = os.path.basename(image_path)
+
+            if ext.lower() in ["jpg", "jpeg", "png"]:
+                image = cv2.imread(image_path)[..., ::-1]
+            elif ext.lower() == "exr":
+                os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+                img = cv2.imread("apartment/images-2k/17/17_DSC0316.exr", cv2.IMREAD_UNCHANGED)
+                # tonemap to sRGB
+                linear_part = 12.92 * img
+                exp_part = 1.055 * (np.maximum(img, 0.0) ** (1 / 2.4)) - 0.055
+                image = np.where(img <= 0.0031308, linear_part, exp_part)
+            else:
+                raise RuntimeError(f"ext = {ext} unrecognized")
+
+            cam_img_h, cam_img_w = image.shape[:2]
+            mask = np.ones((cam_img_h, cam_img_w, 1), np.uint8) * 255
+            dist = np.array([k1, k2, p1, p2, k3], dtype=np.float32)
+            mtx = intrin.copy()
+            mtx[0] *= cam_img_w / width
+            mtx[1] *= cam_img_h / height
+            undistort = cv2.undistort(image, mtx, dist, None, mtx)
+            mask = cv2.undistort(mask, mtx, dist, None, mtx)
+            
+            image = np.concatenate([undistort, mask[..., None]], axis=-1)
+            image = Image.fromarray(np.array(image, dtype=np.byte), "RGBA")
+            cam_infos.append(CameraInfo(uid=cameraId, R=R, T=T, FovY=FovY, FovX=FovX, image=image, cx=cx, cy=cy, 
+                                        image_path=image_path, image_name=image_name, width=cam_img_w, height=cam_img_h,
+                                        distcoeffs=dist))
+        
+        print("\n")
+        sys.stdout.write('\n')
+
+    return cam_infos
+
+
+def readEyefulInfo(path, subdir, force_undistort, eval):
+    import trimesh
+    
+    print("Reading Cameras.json")
+    cam_infos = readCamerasFromEyefulCameras(os.path.join(path, "cameras.json"), subdir, force_undistort)
+    
+    # read split.json
+    with open(os.path.join(path, "splits.json")) as json_file:
+        contents = json.load(json_file)
+        trains = contents["train"]
+        tests = contents["test"]
+        train_cam_infos = [caminfo for caminfo in cam_infos if caminfo.uid in trains]
+        test_cam_infos = [caminfo for caminfo in cam_infos if caminfo.uid in tests]
+
+    if not eval:
+        train_cam_infos.extend(test_cam_infos)
+        test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    obj_path = os.path.join(path, "mesh.obj")
+    assert os.path.exists(obj_path), "Missing mesh.obj"
+    mesh = trimesh.load(obj_path)
+
+    # sample on the mesh
+    num_pts = 500_000
+    xyz, _ = trimesh.sample.sample_surface_even(mesh, num_pts, seed=0)
+    # sample additional points on far-field
+    sphere_pt = np.random.randn(20_000, 3).astype(np.float32)
+    sphere_pt = sphere_pt / (np.linalg.norm(sphere_pt, axis=-1, keepdims=True) + 0.00001) * 100
+    # sample additional points on y = 0 plane
+    plane_pt = np.random.rand(20_000, 3).astype(np.float32) * 100
+    plane_pt[:, 1] *= 0.01
+    plane_pt = plane_pt[np.logical_or(plane_pt[:, 0] < xyz[:, 0].min(), plane_pt[:, 0] > xyz[:, 0].max())]
+    plane_pt = plane_pt[np.logical_or(plane_pt[:, 2] < xyz[:, 2].min(), plane_pt[:, 2] < xyz[:, 2].max())]
+
+    xyz = np.concatenate([xyz, sphere_pt, plane_pt])
+    color = np.ones_like(xyz) * 0.1
+    normals = xyz / np.linalg.norm(xyz, axis=-1, keepdims=True)
+    pcd = BasicPointCloud(points=xyz, colors=color, normals=normals)
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=obj_path)
+    return scene_info
+
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo
+    "Blender" : readNerfSyntheticInfo,
+    "Eyeful": readEyefulInfo,
 }
