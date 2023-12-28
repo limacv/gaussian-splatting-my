@@ -42,12 +42,15 @@ class Scene:
 
         if os.path.exists(os.path.join(args.source_path, "cameras.json") and os.path.join(args.source_path, "mesh.obj")):
             print("Found cameras.json file, assuming Eyeful dataset!")
-            scene_info = sceneLoadTypeCallbacks["Eyeful"](args.source_path, args.eyeful_subdir, args.force_pinhole, args.eval)
+            scene_info = sceneLoadTypeCallbacks["Eyeful"](args.source_path, args.eyeful_subdir, args.eyeful_force_pinhole, args.eval, args.eyeful_loadcamera)
         elif os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
+        elif os.path.exists(os.path.join(args.source_path, "transforms.json")):
+            print("Found transforms.json file, assuming nerfstudio data set!")
+            scene_info = sceneLoadTypeCallbacks["nerfstudio"](args.source_path, args.white_background, args.eval)
         else:
             assert False, "Could not recognize scene type!"
 

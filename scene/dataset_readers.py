@@ -260,9 +260,17 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
 
 
 # for eyeful dataset
-def readCamerasFromEyefulCameras(camjson, imageformat, force_undistort):
+def readCamerasFromEyefulCameras(camjson, imageformat, force_undistort, load_camera="all"):
     import cv2
     cam_infos = []
+
+    # parse skipped camera
+    if len(load_camera) == 0 or load_camera.lower() == "all":
+        print("EyefulCameraReader::loading all cameras")
+        load_camera = None
+    else:
+        load_camera = list(map(int, load_camera.split(',')))
+        print(f"EyefulCameraReader::loading cameras: {load_camera}")
 
     with open(camjson) as json_file:
         contents = json.load(json_file)
@@ -271,6 +279,9 @@ def readCamerasFromEyefulCameras(camjson, imageformat, force_undistort):
             print(f"\r read {i}/{len(contents['KRT'])}", end="")
             cameraId = cam_info_raw["cameraId"]
             sensorId = cam_info_raw["sensorId"]
+            cami = int(cameraId.split('/')[0])
+            if load_camera is not None and cami not in load_camera:
+                continue
             height, width = cam_info_raw["height"], cam_info_raw["width"]
             intrin = np.array(cam_info_raw["K"]).T
             distort_mod = cam_info_raw["distortionModel"]
@@ -343,11 +354,11 @@ def readCamerasFromEyefulCameras(camjson, imageformat, force_undistort):
     return cam_infos
 
 
-def readEyefulInfo(path, subdir, force_pinhole, eval):
+def readEyefulInfo(path, subdir, force_pinhole, eval, load_camera):
     import trimesh
     
     print("Reading Cameras.json")
-    cam_infos = readCamerasFromEyefulCameras(os.path.join(path, "cameras.json"), subdir, force_pinhole)
+    cam_infos = readCamerasFromEyefulCameras(os.path.join(path, "cameras.json"), subdir, force_pinhole, load_camera)
     
     # read split.json
     with open(os.path.join(path, "splits.json")) as json_file:
@@ -387,8 +398,129 @@ def readEyefulInfo(path, subdir, force_pinhole, eval):
     return scene_info
 
 
+def readCamerasFromTransformsNeRFstudio(  # not sure it's correct
+    path, transformsfile, white_background, extension=".png"
+):
+    import cv2
+    cam_infos = []
+
+    with open(os.path.join(path, transformsfile)) as json_file:
+        contents = json.load(json_file)
+
+        try:
+            fovx = contents["camera_angle_x"]
+        except:
+            fovx = None
+
+        frames = contents["frames"]
+
+        # sublist = [19, 20, 21]
+        sublist = [19]
+        frames = [f for f in frames if eval(f["file_path"].split("/")[0]) in sublist]
+        if frames[0]["file_path"].split(".")[-1] in ["jpg", "jpeg", "JPG", "png"]:
+            extension = ""
+
+        c2ws = np.array([frame["transform_matrix"] for frame in frames])
+        Ts = c2ws[:, :3, 3]
+
+        # for idx, frame in enumerate(tqdm(frames)):
+        for idx, frame in enumerate(frames):
+            print(f"\rloading {idx}/{len(frame)} frame")
+            cam_name = os.path.join(path, frame["file_path"] + extension)
+            # depth_name = os.path.join(path, frame["file_path"] + "_depth0000" + '.exr')
+
+            cam_name = cam_name.replace("png", "jpg")
+
+            # NeRF 'transform_matrix' is a camera-to-world transform
+            c2w = np.array(frame["transform_matrix"])
+
+            # change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP (Y down, Z forward)
+            c2w[:3, 1:3] *= -1
+
+            # get the world-to-camera transform and set R, T
+            w2c = np.linalg.inv(c2w)
+            R = np.transpose(
+                w2c[:3, :3]
+            )  # R is stored transposed due to 'glm' in CUDA code
+            T = w2c[:3, 3]
+
+            image_path = os.path.join(path, cam_name)
+            image_name = Path(cam_name).stem
+            image = Image.open(image_path)
+
+            if fovx is not None:
+                fovy = focal2fov(fov2focal(fovx, image.size[0]), image.size[1])
+                FovY = fovy
+                FovX = fovx
+            else:
+                FovY = focal2fov(frame["fl_y"], image.size[1])
+                FovX = focal2fov(frame["fl_x"], image.size[0])
+
+            undistort = True
+            if undistort:
+                mtx = np.array(
+                    [
+                        [frame["fl_x"], 0, frame["cx"]],
+                        [0, frame["fl_y"], frame["cy"]],
+                        [0, 0, 1.0],
+                    ],
+                    dtype=np.float32,
+                )
+
+                # scale = image.size[0] / frame["w"]
+                # mtx[:2] *= scale
+
+                dist = np.array(
+                    [frame["k1"], frame["k2"], frame["p1"], frame["p2"], frame["k3"]],
+                    dtype=np.float32,
+                )
+                im_data = np.array(image.convert("RGB"))
+                arr = cv2.undistort(im_data / 255.0, mtx, dist, None, mtx)
+                image = Image.fromarray(np.array(arr * 255.0, dtype=np.byte), "RGB")
+
+            cam_infos.append(
+                CameraInfo(
+                    uid=idx,
+                    R=R,
+                    T=T,
+                    FovY=FovY,
+                    FovX=FovX,
+                    image=image,
+                    image_path=image_path,
+                    image_name=image_name,
+                    width=image.size[0],
+                    height=image.size[1],
+                )
+            )
+
+    return cam_infos
+
+
+def readNerfstudioInfo(path, white_background, eval, extension=".png"):
+    print("Reading Training Transforms")
+    train_cam_infos = readCamerasFromTransformsNeRFstudio(
+        path, "transforms.json", white_background, extension
+    )
+    print("Omit test set.")
+    test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+    ply_path = os.path.join(path, "points3d.ply")
+    pcd = fetchPly(ply_path)
+
+    scene_info = SceneInfo(
+        point_cloud=pcd,
+        train_cameras=train_cam_infos,
+        test_cameras=test_cam_infos,
+        nerf_normalization=nerf_normalization,
+        ply_path=ply_path,
+    )
+    return scene_info
+
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
     "Blender" : readNerfSyntheticInfo,
     "Eyeful": readEyefulInfo,
+    "nerfstudio": readNerfstudioInfo,
 }
