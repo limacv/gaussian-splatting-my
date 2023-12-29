@@ -55,6 +55,8 @@ class ModelParams(ParamGroup):
         self.eyeful_force_pinhole = True
         self.eyeful_subdir = "images-jpeg-2k"
         self.eyeful_loadcamera = "all"
+        self.city_json = "transforms_lujiazui_9.json"
+        self.city_loadcamerahold = 9
         self.data_device = "cuda"
         self.eval = False
         super().__init__(parser, "Loading Parameters", sentinel)

@@ -24,6 +24,9 @@ from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 from typing import Optional
 from glob import glob
+from utils.camera_utils import _save_camera_mesh
+SAVE_CAMERA_MESH=True
+
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -36,8 +39,8 @@ class CameraInfo(NamedTuple):
     image_name: str
     width: int
     height: int
-    cx: Optional[float] = None  # normalized cx, = cx / w - 0.5
-    cy: Optional[float] = None  # normalized cy, = cy / w - 0.5
+    cx: float = 0.  # normalized cx, = cx / w - 0.5
+    cy: float = 0.  # normalized cy, = cy / w - 0.5
     distcoeffs: Optional[np.array] = None
 
 class SceneInfo(NamedTuple):
@@ -149,7 +152,17 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     reading_dir = "images" if images == None else images
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
-
+    if SAVE_CAMERA_MESH:
+        Rs = np.stack([info.R.T for info in cam_infos])
+        Ts = np.stack([info.T for info in cam_infos])
+        extrin = np.concatenate([Rs, Ts[..., None]], axis=-1)
+        intrin = np.zeros_like(Rs)
+        intrin[:, 2, 2] = 1.
+        intrin[:, 0, 0] = [fov2focal(info.FovX, info.width) for info in cam_infos]
+        intrin[:, 1, 1] = [fov2focal(info.FovY, info.height) for info in cam_infos]
+        intrin[:, 0, 2] = [(info.cx + 0.5) * info.width for info in cam_infos]
+        intrin[:, 1, 2] = [(info.cy + 0.5) * info.height for info in cam_infos]
+        _save_camera_mesh(os.path.join(path, "cam.obj"), extrin, intrin, isc2w=False)
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
         test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
@@ -258,6 +271,49 @@ def readNerfSyntheticInfo(path, white_background, eval, extension=".png"):
                            ply_path=ply_path)
     return scene_info
 
+
+def readCityCameras(path, transformsfile, hold):
+    cam_infos = []
+
+    with open(os.path.join(path, transformsfile)) as json_file:
+        contents = json.load(json_file)
+        frames = contents["frames"]
+        for idx, frame in enumerate(frames):
+            if idx % hold != 0:
+                continue
+            print(f"\r Reading frames {idx}/{len(frames)}", end='')
+            cam_name = os.path.join(path, frame["file_path"])
+
+            # NeRF 'transform_matrix' is a camera-to-world transform
+            c2w = np.array(frame["transform_matrix"])
+            # change from OpenGL/Blender camera axes (Y up, Z back) to COLMAP (Y down, Z forward)
+            c2w[:3, 1:3] *= -1
+
+            # get the world-to-camera transform and set R, T
+            w2c = np.linalg.inv(c2w)
+            R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
+            T = w2c[:3, 3]
+
+            image_path = os.path.join(path, cam_name)
+            image_name = Path(cam_name).stem
+            image = Image.open(image_path)
+
+            focalx = frame["fl_x"]
+            focaly = frame["fl_y"]
+            cx = frame["cx"]
+            cy = frame["cy"]
+            w = frame["w"]
+            h = frame["h"]
+            assert (w, h) == image.size
+            FovX = focal2fov(focalx, w)
+            FovY = focal2fov(focaly, h)
+            cx = cx / w - 0.5
+            cy = cy / h - 0.5
+            cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
+                            image_path=image_path, image_name=image_name, width=w, height=h,
+                            cx=cx, cy=cy))
+    print("\n")
+    return cam_infos
 
 # for eyeful dataset
 def readCamerasFromEyefulCameras(camjson, imageformat, force_undistort, load_camera="all"):
@@ -518,9 +574,62 @@ def readNerfstudioInfo(path, white_background, eval, extension=".png"):
     return scene_info
 
 
+def readCityInfo(path, jsonfile, eval, hold):
+    print("Reading Training Transforms")
+    cam_infos = readCityCameras(path, jsonfile, hold)
+    print(f"Loaded {len(cam_infos)} cameras")
+    if SAVE_CAMERA_MESH:
+        Rs = np.stack([info.R.T for info in cam_infos])
+        Ts = np.stack([info.T for info in cam_infos])
+        extrin = np.concatenate([Rs, Ts[..., None]], axis=-1)
+        intrin = np.zeros_like(Rs)
+        intrin[:, 2, 2] = 1.
+        intrin[:, 0, 0] = [fov2focal(info.FovX, info.width) for info in cam_infos]
+        intrin[:, 1, 1] = [fov2focal(info.FovY, info.height) for info in cam_infos]
+        intrin[:, 0, 2] = [(info.cx + 0.5) * info.width for info in cam_infos]
+        intrin[:, 1, 2] = [(info.cy + 0.5) * info.height for info in cam_infos]
+        _save_camera_mesh(os.path.join(path, jsonfile.split('.')[0] + "_cam.obj"), extrin, intrin, isc2w=False)
+
+    if eval:
+        eval_idx = (np.round(np.linspace(0, len(cam_infos) - 1, 20))).astype(np.int32)
+        train_idx = set(np.arange(len(cam_infos))) - set(eval_idx)
+        train_cam_infos = [cam_infos[i] for i in train_idx]
+        test_cam_infos = [cam_infos[i] for i in eval_idx]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(cam_infos)
+
+    ply_path = os.path.join(path, jsonfile.split('.')[0] + "_init_pts.obj")
+    print(ply_path)
+
+    num_pts = 1_000_000
+    print(f"Generating random point cloud ({num_pts})...")
+    print('randomized positions for sh_city data')
+    xyz = np.random.random((num_pts, 3)) * np.array([100, 100, 0.05])
+    print('randomized range', xyz.max(0), xyz.min(0))
+    shs = np.random.random((num_pts, 3)) / 255.0
+    pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
+    # store random pts as points3d.ply
+    storePly(ply_path, xyz, SH2RGB(shs) * 255)
+
+    try:
+        pcd = fetchPly(ply_path)
+    except:
+        pass 
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
     "Blender" : readNerfSyntheticInfo,
     "Eyeful": readEyefulInfo,
     "nerfstudio": readNerfstudioInfo,
+    "City" : readCityInfo
 }

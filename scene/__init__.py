@@ -43,6 +43,9 @@ class Scene:
         if os.path.exists(os.path.join(args.source_path, "cameras.json") and os.path.join(args.source_path, "mesh.obj")):
             print("Found cameras.json file, assuming Eyeful dataset!")
             scene_info = sceneLoadTypeCallbacks["Eyeful"](args.source_path, args.eyeful_subdir, args.eyeful_force_pinhole, args.eval, args.eyeful_loadcamera)
+        elif os.path.exists(os.path.join(args.source_path, args.city_json)):
+            print(f"Found {args.city_json} file, assuming City dataset!")
+            scene_info = sceneLoadTypeCallbacks["City"](args.source_path, args.city_json, args.eval, args.city_loadcamerahold)
         elif os.path.exists(os.path.join(args.source_path, "sparse")):
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):

@@ -61,17 +61,17 @@
 #     --eval \
 #     --backend my
 
-for dataset in apartment; do
+# for dataset in apartment; do
 
 # 3w
-python train.py \
-    -s /cpfs01/shared/pjlab-lingjun-landmarks/eyeful/$dataset \
-    --model_path /cpfs01/user/mali1/output/eyeful_${dataset}_3view_nodistort_jpeg2k \
-    --eyeful_loadcamera "19,20,21,17" \
-    --eyeful_subdir images-jpeg-2k \
-    --test_iterations 10 100 1000 7000 10000 25000 30000 \
-    --checkpoint_iterations 7000 30000 \
-    --eval
+# python train.py \
+#     -s /cpfs01/shared/pjlab-lingjun-landmarks/eyeful/$dataset \
+#     --model_path /cpfs01/user/mali1/output/eyeful_${dataset}_3view_nodistort_jpeg2k \
+#     --eyeful_loadcamera "19,20,21,17" \
+#     --eyeful_subdir images-jpeg-2k \
+#     --test_iterations 10 100 1000 7000 10000 25000 30000 \
+#     --checkpoint_iterations 7000 30000 \
+#     --eval
 
 # 6w
 # python train.py \
@@ -88,6 +88,20 @@ python train.py \
 #     --densify_until_iter 30000 \
 #     --eval
 
+# done
+
+# lujiazui_9_huanqiu_tiejin
+# lujiazui_9_jinmao_tiejin
+for jsonname in lujiazui_9_jinmao_tiejin; do
+python train.py \
+    -s /cpfs01/shared/pjlab-lingjun-landmarks/data/sanjiantao \
+    --model_path /cpfs01/user/mali1/output/hold6_${jsonname} \
+    --city_json transforms_${jsonname}_downsample5.json \
+    --city_loadcamerahold 6 \
+    --resolution 1 \
+    --test_iterations 10 100 1000 7000 10000 25000 30000 \
+    --checkpoint_iterations 7000 30000\
+    --eval
 done
 
 exit 0
