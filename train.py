@@ -89,6 +89,14 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
         image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
+        # Render alpha mask
+        if viewpoint_cam.bg_image is not None:
+            alpha_pkg = render(viewpoint_cam, gaussians, pipe, 
+                            bg_color=torch.tensor([0., 0., 0.]).type_as(gaussians.get_xyz), 
+                            override_color=torch.ones_like(gaussians.get_xyz))
+            alpha_mask = alpha_pkg["render"][None, :1]
+            image = image * alpha_mask + viewpoint_cam.bg_image.to("cuda") * (1 - alpha_mask)
+        
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
         if viewpoint_cam.alpha_mask is not None:

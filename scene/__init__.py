@@ -40,7 +40,9 @@ class Scene:
         self.train_cameras = {}
         self.test_cameras = {}
 
-        if os.path.exists(os.path.join(args.source_path, "cameras.json") and os.path.join(args.source_path, "mesh.obj")):
+        if "VPS05" in args.source_path:
+            scene_info = sceneLoadTypeCallbacks["FaceRigSV"](args.source_path)
+        elif os.path.exists(os.path.join(args.source_path, "cameras.json") and os.path.join(args.source_path, "mesh.obj")):
             print("Found cameras.json file, assuming Eyeful dataset!")
             scene_info = sceneLoadTypeCallbacks["Eyeful"](args.source_path, args.eyeful_subdir, args.eyeful_force_pinhole, args.eval, args.eyeful_loadcamera)
         elif os.path.exists(os.path.join(args.source_path, args.city_json)):

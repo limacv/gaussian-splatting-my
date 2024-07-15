@@ -24,6 +24,9 @@ from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 from typing import Optional
 from glob import glob
+from tqdm import tqdm
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+import torch
 from utils.camera_utils import _save_camera_mesh
 SAVE_CAMERA_MESH=True
 
@@ -41,6 +44,8 @@ class CameraInfo(NamedTuple):
     height: int
     cx: float = 0.  # normalized cx, = cx / w - 0.5
     cy: float = 0.  # normalized cy, = cy / w - 0.5
+    bg_image: Optional[np.array] = None
+    mask: Optional[np.array] = None
     distcoeffs: Optional[np.array] = None
 
 class SceneInfo(NamedTuple):
@@ -626,10 +631,83 @@ def readCityInfo(path, jsonfile, eval, hold):
     return scene_info
 
 
+def readFaceRigSingleFrameInfo(path):
+    with open(os.path.join(path, "vps05_camera.json"), 'r') as json_file:
+        cd = json.load(json_file)
+
+    cam_infos_unsorted = []
+    for cid, cam_data in enumerate(cd):
+        cam_R = cam_data["R"]
+        cam_T = cam_data["T"]
+        cam_in = np.array(cam_data["intrinsics"])
+        cam_w = cam_data["width"]
+        cam_h = cam_data["height"]
+        # k1 = cam_data["lens_coefficients_k1"]
+        # k2 = cam_data["lens_coefficients_k2"]
+        # p1 = cam_data["lens_coefficients_p1"]
+        # p2 = cam_data["lens_coefficients_p2"]
+        # k3 = cam_data["lens_coefficients_k3"]
+        # cam_coef = np.array((k1, k2, p1, p2, k3))
+            
+        R = np.transpose(cam_R)
+        T = np.array(cam_T)
+        focal_length_x = cam_in[0, 0]
+        if abs(focal_length_x) < 1e-5:
+            continue
+        
+        FovY = focal2fov(focal_length_x, cam_h)
+        FovX = focal2fov(focal_length_x, cam_w)
+
+        image_path = os.path.join(path, "images", cam_data["image_path"])
+        im = Image.open(image_path)
+        bg_im = None
+        if "bg_path" in cam_data:
+            bg_path = os.path.join(path, "images", cam_data["bg_path"])
+            bg_im = Image.open(bg_path)
+
+        mask = None
+        if "mask_path" in cam_data:
+            mask_path = os.path.join(path, "images", cam_data["mask_path"])
+            mask = Image.open(mask_path)
+        
+        cam_info = CameraInfo(uid=cid, R=R, T=T, FovX=FovX, FovY=FovY,
+                            image=im,
+                            image_path=image_path, image_name=cam_data["image_path"],
+                            width=cam_w, height=cam_h,
+                            bg_image=bg_im, mask=mask)
+        cam_infos_unsorted.append(cam_info)
+
+    # print("HMM: cam_infos_unsorted = ", cam_infos_unsorted)
+    cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
+    print("HMM: number of cam_infos = " , len(cam_infos))
+
+    if eval:
+        eval_cam_ids = [1, 15, 30, 35, 45, 60, 75]
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if (c.uid not in eval_cam_ids)]
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if (c.uid in eval_cam_ids)]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+
+    # HMM: shared cameras
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+    
+    ply_path = os.path.join(path, "points3D.ply")
+    pcd = fetchPly(ply_path)
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)        
+    return scene_info
+
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
     "Blender" : readNerfSyntheticInfo,
     "Eyeful": readEyefulInfo,
     "nerfstudio": readNerfstudioInfo,
-    "City" : readCityInfo
+    "City" : readCityInfo,
+    "FaceRigSV": readFaceRigSingleFrameInfo
 }
