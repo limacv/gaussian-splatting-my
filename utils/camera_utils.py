@@ -14,7 +14,6 @@ import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
 from typing import Optional, Union
-import torch
 
 WARNED = False
 

@@ -579,60 +579,9 @@ def readNerfstudioInfo(path, white_background, eval, extension=".png"):
     return scene_info
 
 
-def readCityInfo(path, jsonfile, eval, hold):
-    print("Reading Training Transforms")
-    cam_infos = readCityCameras(path, jsonfile, hold)
-    print(f"Loaded {len(cam_infos)} cameras")
-    if SAVE_CAMERA_MESH:
-        Rs = np.stack([info.R.T for info in cam_infos])
-        Ts = np.stack([info.T for info in cam_infos])
-        extrin = np.concatenate([Rs, Ts[..., None]], axis=-1)
-        intrin = np.zeros_like(Rs)
-        intrin[:, 2, 2] = 1.
-        intrin[:, 0, 0] = [fov2focal(info.FovX, info.width) for info in cam_infos]
-        intrin[:, 1, 1] = [fov2focal(info.FovY, info.height) for info in cam_infos]
-        intrin[:, 0, 2] = [(info.cx + 0.5) * info.width for info in cam_infos]
-        intrin[:, 1, 2] = [(info.cy + 0.5) * info.height for info in cam_infos]
-        _save_camera_mesh(os.path.join(path, jsonfile.split('.')[0] + "_cam.obj"), extrin, intrin, isc2w=False)
-
-    if eval:
-        eval_idx = (np.round(np.linspace(0, len(cam_infos) - 1, 20))).astype(np.int32)
-        train_idx = set(np.arange(len(cam_infos))) - set(eval_idx)
-        train_cam_infos = [cam_infos[i] for i in train_idx]
-        test_cam_infos = [cam_infos[i] for i in eval_idx]
-    else:
-        train_cam_infos = cam_infos
-        test_cam_infos = []
-
-    nerf_normalization = getNerfppNorm(cam_infos)
-
-    ply_path = os.path.join(path, jsonfile.split('.')[0] + "_init_pts.obj")
-    print(ply_path)
-
-    num_pts = 1_000_000
-    print(f"Generating random point cloud ({num_pts})...")
-    print('randomized positions for sh_city data')
-    xyz = np.random.random((num_pts, 3)) * np.array([100, 100, 0.05])
-    print('randomized range', xyz.max(0), xyz.min(0))
-    shs = np.random.random((num_pts, 3)) / 255.0
-    pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
-    # store random pts as points3d.ply
-    storePly(ply_path, xyz, SH2RGB(shs) * 255)
-
-    try:
-        pcd = fetchPly(ply_path)
-    except:
-        pass 
-    scene_info = SceneInfo(point_cloud=pcd,
-                           train_cameras=train_cam_infos,
-                           test_cameras=test_cam_infos,
-                           nerf_normalization=nerf_normalization,
-                           ply_path=ply_path)
-    return scene_info
-
-
-def readFaceRigSingleFrameInfo(path):
-    with open(os.path.join(path, "vps05_camera.json"), 'r') as json_file:
+def readFaceRigSingleFrameInfo(jsonpath, resize_factor = 1., eval=False):
+    path = os.path.dirname(jsonpath)
+    with open(os.path.join(jsonpath), 'r') as json_file:
         cd = json.load(json_file)
 
     cam_infos_unsorted = []
@@ -642,12 +591,6 @@ def readFaceRigSingleFrameInfo(path):
         cam_in = np.array(cam_data["intrinsics"])
         cam_w = cam_data["width"]
         cam_h = cam_data["height"]
-        # k1 = cam_data["lens_coefficients_k1"]
-        # k2 = cam_data["lens_coefficients_k2"]
-        # p1 = cam_data["lens_coefficients_p1"]
-        # p2 = cam_data["lens_coefficients_p2"]
-        # k3 = cam_data["lens_coefficients_k3"]
-        # cam_coef = np.array((k1, k2, p1, p2, k3))
             
         R = np.transpose(cam_R)
         T = np.array(cam_T)
@@ -670,6 +613,17 @@ def readFaceRigSingleFrameInfo(path):
             mask_path = os.path.join(path, "images", cam_data["mask_path"])
             mask = Image.open(mask_path)
         
+        cam_w, cam_h = im.size
+        # resize if necessary
+        if resize_factor != 1.0:
+            cam_w = int(cam_w * resize_factor)
+            cam_h = int(cam_h * resize_factor)
+            im = im.resize((cam_w, cam_h))
+            if bg_im is not None:
+                bg_im = bg_im.resize((cam_w, cam_h))
+            if mask is not None:
+                mask = mask.resize((cam_w, cam_h))
+
         cam_info = CameraInfo(uid=cid, R=R, T=T, FovX=FovX, FovY=FovY,
                             image=im,
                             image_path=image_path, image_name=cam_data["image_path"],
@@ -701,13 +655,3 @@ def readFaceRigSingleFrameInfo(path):
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path)        
     return scene_info
-
-
-sceneLoadTypeCallbacks = {
-    "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo,
-    "Eyeful": readEyefulInfo,
-    "nerfstudio": readNerfstudioInfo,
-    "City" : readCityInfo,
-    "FaceRigSV": readFaceRigSingleFrameInfo
-}
