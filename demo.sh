@@ -1,13 +1,26 @@
 {
 
-#######################################################################
-##  Optimize Normal
-#######################################################################
+# CUDA_VISIBLE_DEVICES=1 python train.py \
+#     -s /root/public/gss/VPS05_kevin_diffuse_frm38/vps05_camera.json \
+#     --model_path /root/public/gss/results/kevin_frm38_diffuse_factor15_nolrrescale \
+#     --test_iterations 10 100 1000 7000 30000 \
+#     --checkpoint_iterations 7000 30000 \
+#     --facerig_factor 1.5 &
+
 python train.py \
-    -s /root/public/gss/VPS05_kevin_relit02_0_1_frm38/ \
-    --model_path /root/public/gss/results/kevin_frm38_relit_withmask \
+    -s /root/public/gss/VPS05_kevin_relit02_0_1_frm38/vps05_camera_gsbuffer.json \
+    --model_path /root/public/gss/results/kevin_frm38_relit_fa15_withgsmasksup \
     --test_iterations 10 100 1000 7000 30000 \
-    --checkpoint_iterations 7000 30000 
+    --checkpoint_iterations 7000 30000 \
+    --facerig_factor 1.5
+
+# python train.py \
+#     -s /root/public/gss/VPS05_kevin_relit02_0_1_frm38/vps05_camera.json \
+#     --model_path /root/public/gss/results/kevin_frm38_relit_fa15_withmask \
+#     --test_iterations 10 100 1000 7000 30000 \
+#     --checkpoint_iterations 7000 30000 \
+#     --facerig_factor 1.5
+
 
 # python train.py \
 #     -s /home/lmaag/xgpu-scratch/lmaag/data/zhu/ \

@@ -243,7 +243,10 @@ class GaussianModel:
         xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
                         np.asarray(plydata.elements[0]["y"]),
                         np.asarray(plydata.elements[0]["z"])),  axis=1)
-        normal = np.stack((np.asarray(plydata.elements[0]["normal"])), axis=1)
+        if "normal" in plydata.elements[0]:
+            normal = np.stack((np.asarray(plydata.elements[0]["normal"])), axis=1)
+        else:
+            normal = np.ones_like(xyz)
         opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
 
         features_dc = np.zeros((xyz.shape[0], 3, 1))

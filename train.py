@@ -95,13 +95,12 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                             bg_color=torch.tensor([0., 0., 0.]).type_as(gaussians.get_xyz), 
                             override_color=torch.ones_like(gaussians.get_xyz))
             alpha_mask = alpha_pkg["render"][None, :1]
-            image = image * alpha_mask + viewpoint_cam.bg_image.to("cuda") * (1 - alpha_mask)
+            image = image + viewpoint_cam.bg_image.to("cuda") * (1 - alpha_mask)
         
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
         if viewpoint_cam.alpha_mask is not None:
             gt_mask = viewpoint_cam.alpha_mask.cuda()
-            image = image * gt_mask
             gt_image = gt_image * gt_mask
 
         Ll1 = l1_loss(image, gt_image)
