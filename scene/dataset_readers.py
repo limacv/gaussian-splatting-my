@@ -46,6 +46,7 @@ class CameraInfo(NamedTuple):
     cy: float = 0.  # normalized cy, = cy / w - 0.5
     bg_image: Optional[np.array] = None
     mask: Optional[np.array] = None
+    depth: Optional[np.array] = None
     distcoeffs: Optional[np.array] = None
 
 class SceneInfo(NamedTuple):
@@ -613,6 +614,13 @@ def readFaceRigSingleFrameInfo(jsonpath, resize_factor = 1., eval=False):
             mask_path = os.path.join(path, "images", cam_data["mask_path"])
             mask = Image.open(mask_path)
         
+        depth = None
+        if "depth_path" in cam_data:
+            import cv2
+            os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+            depth_path = os.path.join(path, "images", cam_data["depth_path"])
+            depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
+        
         cam_w, cam_h = im.size
         # resize if necessary
         if resize_factor != 1.0:
@@ -623,12 +631,14 @@ def readFaceRigSingleFrameInfo(jsonpath, resize_factor = 1., eval=False):
                 bg_im = bg_im.resize((cam_w, cam_h))
             if mask is not None:
                 mask = mask.resize((cam_w, cam_h))
+            if depth is not None:
+                depth = cv2.resize(depth, (cam_w, cam_h), interpolation=cv2.INTER_NEAREST)
 
         cam_info = CameraInfo(uid=cid, R=R, T=T, FovX=FovX, FovY=FovY,
                             image=im,
                             image_path=image_path, image_name=cam_data["image_path"],
                             width=cam_w, height=cam_h,
-                            bg_image=bg_im, mask=mask)
+                            bg_image=bg_im, mask=mask, depth=depth)
         cam_infos_unsorted.append(cam_info)
 
     # print("HMM: cam_infos_unsorted = ", cam_infos_unsorted)

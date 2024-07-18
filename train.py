@@ -106,6 +106,26 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
 
+        # depth loss
+        if opt.lambda_depth > 0 and viewpoint_cam.depth_map is not None:
+            xyz = gaussians.get_xyz
+            xyzw = torch.cat([xyz, torch.ones_like(xyz[:, :1])], dim=-1)
+            view_mat = viewpoint_cam.world_view_transform
+            xyzw_view = xyzw @ view_mat[:, :3]
+            zbuffer = xyzw_view[:, 2:3]
+            zbuffer = torch.nan_to_num(zbuffer, 0, 0, 0)
+            zbuffer_max = zbuffer.max()
+            zbuffer = zbuffer / zbuffer_max
+            zbuffer = zbuffer.expand(-1, 3).contiguous()
+            buffer_pkg = render(viewpoint_cam, gaussians, pipe, 
+                                bg_color=torch.tensor([0., 0., 0.]).type_as(zbuffer), 
+                                override_color=zbuffer)
+            
+            gt_depth_map = viewpoint_cam.depth_map.cuda()
+            depth_map = buffer_pkg["render"][0] * zbuffer_max
+            depth_loss = l1_loss(depth_map, gt_depth_map)
+            loss = loss + opt.lambda_depth * depth_loss
+
         # normal optimization
         if opt.optimize_normal:
             with torch.no_grad():

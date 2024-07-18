@@ -7,20 +7,47 @@
 #     --checkpoint_iterations 7000 30000 \
 #     --facerig_factor 1.5 &
 
-python train.py \
-    -s /root/public/gss/VPS05_kevin_relit02_0_1_frm38/vps05_camera_gsbuffer.json \
-    --model_path /root/public/gss/results/kevin_frm38_relit_fa15_withgsmasksup \
-    --test_iterations 10 100 1000 7000 30000 \
-    --checkpoint_iterations 7000 30000 \
-    --facerig_factor 1.5
-
 # python train.py \
-#     -s /root/public/gss/VPS05_kevin_relit02_0_1_frm38/vps05_camera.json \
-#     --model_path /root/public/gss/results/kevin_frm38_relit_fa15_withmask \
+#     -s /root/public/gss/VPS05_kevin_relit02_0_1_frm38/vps05_camera_gsbuffer.json \
+#     --model_path /root/public/gss/results/kevin_frm38_relit_fa15_withgsmasksup \
 #     --test_iterations 10 100 1000 7000 30000 \
 #     --checkpoint_iterations 7000 30000 \
 #     --facerig_factor 1.5
 
+# CUDA_VISIBLE_DEVICES=1 python train.py \
+#     -s /root/public/gss/VPS05_kevin_relit02_0_1_frm38/vps05_camera_gsbuffer.json \
+#     --model_path /root/public/gss/results/kevin_frm38_relit_fa15_withgsmasksup_initgs \
+#     --iterations 9000 \
+#     --position_lr_max_steps 9000 \
+#     --feature_lr 0.005 \
+#     --opacity_reset_interval 3000 \
+#     --densify_from_iter 3000 \
+#     --densify_until_iter 6000 \
+#     --test_iterations 10 100 5000 9000 \
+#     --checkpoint_iterations 5000 9000 \
+#     --facerig_factor 1.5
+
+# CUDA_VISIBLE_DEVICES=1 python train.py \
+#     -s /root/public/gss/VPS05_kevin_relit02_0_1_frm38/vps05_camera_gsbuffer.json \
+#     --model_path /root/public/gss/results/kevin_frm38_relit_fa15_withgsmasksup_initgs_depth \
+#     --iterations 9000 \
+#     --position_lr_max_steps 9000 \
+#     --feature_lr 0.005 \
+#     --opacity_reset_interval 3000 \
+#     --densify_from_iter 3000 \
+#     --densify_until_iter 6000 \
+#     --test_iterations 10 100 5000 9000 \
+#     --checkpoint_iterations 5000 9000 \
+#     --lambda_depth 1.0 \
+#     --facerig_factor 1.5
+
+python train.py \
+    -s /root/public/gss/VPS05_kevin_relit02_0_1_frm38/vps05_camera_gsbuffer.json \
+    --model_path /root/public/gss/results/kevin_frm38_relit_fa15_withgsmasksup_dloss1 \
+    --test_iterations 10 100 1000 7000 30000 \
+    --checkpoint_iterations 7000 30000 \
+    --lambda_depth 1.0 \
+    --facerig_factor 1.5
 
 # python train.py \
 #     -s /home/lmaag/xgpu-scratch/lmaag/data/zhu/ \

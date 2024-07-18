@@ -60,7 +60,7 @@ class Scene:
             print("Loading Test Cameras")
             self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale, args)
 
-        if args.initial_gs_model is not None:
+        if args.initial_gs_model:
             if not os.path.exists(args.initial_gs_model):
                 print(f"Could not find initial model at {args.initial_gs_model}")
                 exit(-1)
